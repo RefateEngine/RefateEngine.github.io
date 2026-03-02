@@ -9,18 +9,18 @@
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1e1e1e; color: #d4d4d4; padding: 2rem; }
         .container { max-width: 800px; margin: 0 auto; background: #252526; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         h1 { color: #569cd6; font-size: 1.5rem; margin-top: 0; }
-        p { font-size: 0.9rem; color: #cccccc; }
-        textarea { width: 100%; height: 300px; background: #1e1e1e; color: #d4d4d4; border: 1px solid #3c3c3c; padding: 1rem; font-family: monospace; font-size: 14px; border-radius: 4px; box-sizing: border-box; resize: vertical; }
+        p { font-size: 0.9rem; color: #cccccc; margin-bottom: 1rem; }
+        textarea { width: 100%; height: 350px; background: #1e1e1e; color: #d4d4d4; border: 1px solid #3c3c3c; padding: 1rem; font-family: monospace; font-size: 14px; border-radius: 4px; box-sizing: border-box; resize: vertical; }
         textarea:focus { outline: none; border-color: #007acc; }
-        button { background: #007acc; color: white; border: none; padding: 10px 20px; font-size: 1rem; border-radius: 4px; cursor: pointer; margin-top: 1rem; width: 100%; font-weight: bold; }
+        button { background: #007acc; color: white; border: none; padding: 15px 20px; font-size: 1.1rem; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold; margin-top: 15px; transition: background 0.2s; }
         button:hover { background: #005f9e; }
-        .alert { color: #ce9178; font-size: 0.85rem; margin-top: 0.5rem; }
+        .note { color: #808080; font-size: 0.85rem; margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>re_hyway: Event Tree Generator</h1>
-        <p><code>event_tree/meta.txt</code> の内容（JSON配列）、または新規の配列を以下にペーストしてください。<br>※IDをズラしたくない場合は、削除するパスを <code>null</code> に置き換えて欠番にしてください。</p>
+        <p>イベントパスの配列（JSON）を入力してください。<br>※IDのズレを防ぐため、削除したイベントは <code>null</code> に置き換えてください。</p>
         
         <textarea id="jsonInput">[
   "mymap:skill/fire",
@@ -28,34 +28,35 @@
   null,
   "mymap:boss/spawn"
 ]</textarea>
-        <div class="alert">※ 生成された「event_tree.zip」を解凍し、既存の event_tree フォルダに上書きしてください。</div>
         
-        <button onclick="generateZip()">イベントツリー (ZIP) を生成</button>
+        <button onclick="generateZip()">📦 event_tree.zip をダウンロード</button>
+        <div class="note">ダウンロードしたZIPを解凍し、データパック内の <code>functions/event_tree</code> フォルダに上書きしてください。</div>
     </div>
 
     <script>
         async function generateZip() {
             const inputStr = document.getElementById("jsonInput").value;
             let eventPaths;
+            
             try {
                 eventPaths = JSON.parse(inputStr);
-                if (!Array.isArray(eventPaths)) throw new Error("配列ではありません");
+                if (!Array.isArray(eventPaths)) throw new Error();
             } catch (e) {
-                alert("JSONの形式が間違っています。\n[\"path1\", \"path2\"] のような配列形式にしてください。");
+                alert("JSONの形式が正しくありません。\n[\"path1\", \"path2\"] のような配列形式にしてください。");
                 return;
             }
 
             const zip = new JSZip();
             const namespace = "re_hyway";
             
-            // meta.txt の保存
+            // 1. meta.txt を生成 (外部配置用なので .txt でOK)
             zip.file(`meta.txt`, JSON.stringify(eventPaths, null, 2));
 
             const p2iFolder = zip.folder(`p2i`);
             const i2pFolder = zip.folder(`i2p`);
             const validEvents = [];
 
-            // p2iの生成と有効イベント抽出
+            // 2. p2i の生成
             eventPaths.forEach((path, index) => {
                 if (!path) return;
                 const eventId = index + 1;
@@ -63,7 +64,7 @@
                 p2iFolder.file(`${path}.mcfunction`, `scoreboard players set @s ${namespace}.eventId ${eventId}`);
             });
 
-            // i2p (二分探索ツリー) の生成ロジック
+            // 3. i2p (二分探索ツリー) の生成
             function buildTree(events, folderName = "") {
                 if (events.length === 0) return;
                 if (events.length === 1) {
@@ -80,6 +81,7 @@
                 const midId = leftHalf[leftHalf.length - 1].id;
 
                 let nodeContent = "";
+                
                 if (leftHalf.length === 1) {
                     nodeContent += `execute if score @s ${namespace}.eventId matches ${leftHalf[0].id} run function ${namespace}:event_tree/i2p/leaf_${leftHalf[0].id}\n`;
                 } else {
@@ -100,8 +102,15 @@
 
             if (validEvents.length > 0) buildTree(validEvents, "root");
 
-            // ZIP出力処理
-            const blob = await zip.generateAsync({ type: "blob" });
+            // 4. Windowsでブロックされにくい設定でZIPを生成
+            const content = await zip.generateAsync({ 
+                type: "blob",
+                platform: "DOS",
+                compression: "DEFLATE",
+                compressionOptions: { level: 6 }
+            });
+            
+            const blob = new Blob([content], { type: "application/zip" });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
             link.download = "event_tree.zip";
