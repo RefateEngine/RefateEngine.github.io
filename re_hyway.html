@@ -47,60 +47,77 @@
             }
 
             const zip = new JSZip();
-            const namespace = "re_hyway";
-            
-            // 1. meta.txt を生成 (外部配置用なので .txt でOK)
-            zip.file(`meta.txt`, JSON.stringify(eventPaths, null, 2));
+const namespace = "re_hyway";
 
-            const p2iFolder = zip.folder(`p2i`);
-            const i2pFolder = zip.folder(`i2p`);
-            const validEvents = [];
+// 1. meta.txt の生成
+zip.file(`meta.txt`, JSON.stringify(eventPaths, null, 2));
 
-            // 2. p2i の生成
-            eventPaths.forEach((path, index) => {
-                if (!path) return;
-                const eventId = index + 1;
-                validEvents.push({ id: eventId, path: path });
-                p2iFolder.file(`${path}.mcfunction`, `scoreboard players set @s ${namespace}.eventId ${eventId}`);
-            });
+const validEvents = [];
+let p2iContent = ""; // p2i は1つのファイルにずらーっと書く
 
-            // 3. i2p (二分探索ツリー) の生成
-            function buildTree(events, folderName = "") {
-                if (events.length === 0) return;
-                if (events.length === 1) {
-                    i2pFolder.file(`leaf_${events[0].id}.mcfunction`, `function ${events[0].path}`);
-                    return;
-                }
+// 2. p2i.mcfunction の中身を生成
+eventPaths.forEach((path, index) => {
+    if (!path) return; // null（欠番）はスキップ
+    const eventId = index + 1;
+    validEvents.push({ id: eventId, path: path });
 
-                const midIndex = Math.floor(events.length / 2);
-                const leftHalf = events.slice(0, midIndex);
-                const rightHalf = events.slice(midIndex);
+    // ※データストレージ（re_hyway:io）の {path:"..."} を照合する想定のコマンド
+    p2iContent += `execute if data storage ${namespace}:io {path:"${path}"} run scoreboard players set #re_hyway ${namespace}.eventId ${eventId}\n`;
+});
 
-                const minId = events[0].id;
-                const maxId = events[events.length - 1].id;
-                const midId = leftHalf[leftHalf.length - 1].id;
+// p2iフォルダではなく、単一のファイルとして保存
+zip.file(`p2i.mcfunction`, p2iContent);
 
-                let nodeContent = "";
-                
-                if (leftHalf.length === 1) {
-                    nodeContent += `execute if score @s ${namespace}.eventId matches ${leftHalf[0].id} run function ${namespace}:event_tree/i2p/leaf_${leftHalf[0].id}\n`;
-                } else {
-                    nodeContent += `execute if score @s ${namespace}.eventId matches ${minId}..${midId} run function ${namespace}:event_tree/i2p/node_${minId}_${midId}\n`;
-                    buildTree(leftHalf);
-                }
 
-                if (rightHalf.length === 1) {
-                    nodeContent += `execute if score @s ${namespace}.eventId matches ${rightHalf[0].id} run function ${namespace}:event_tree/i2p/leaf_${rightHalf[0].id}\n`;
-                } else {
-                    nodeContent += `execute if score @s ${namespace}.eventId matches ${midId + 1}..${maxId} run function ${namespace}:event_tree/i2p/node_${midId + 1}_${maxId}\n`;
-                    buildTree(rightHalf);
-                }
+// 3. i2p (二分探索ツリー) の生成
+const i2pFolder = zip.folder(`i2p`);
 
-                const fileName = folderName || `node_${minId}_${maxId}`;
-                i2pFolder.file(`${fileName}.mcfunction`, nodeContent);
-            }
+function buildTree(events, folderName = "") {
+    if (events.length === 0) return;
+    
+    // 【終端ノードの生成（葉っぱ）】
+    if (events.length === 1) {
+        i2pFolder.file(`leaf_${events[0].id}.mcfunction`, `function ${events[0].path}`);
+        return;
+    }
 
-            if (validEvents.length > 0) buildTree(validEvents, "root");
+    const midIndex = Math.floor(events.length / 2);
+    const leftHalf = events.slice(0, midIndex);
+    const rightHalf = events.slice(midIndex);
+
+    const minId = events[0].id;
+    const maxId = events[events.length - 1].id;
+    const midId = leftHalf[leftHalf.length - 1].id;
+
+    let nodeContent = "";
+
+    // --- 前半への分岐 ---
+    if (leftHalf.length === 1) {
+        nodeContent += `execute if score @s ${namespace}.eventId matches ${leftHalf[0].id} run function ${namespace}:event_tree/i2p/leaf_${leftHalf[0].id}\n`;
+        // ★修正：長さが1の時も、ちゃんと葉っぱを生成させるために buildTree を呼ぶ！
+        buildTree(leftHalf); 
+    } else {
+        nodeContent += `execute if score @s ${namespace}.eventId matches ${minId}..${midId} run function ${namespace}:event_tree/i2p/node_${minId}_${midId}\n`;
+        buildTree(leftHalf);
+    }
+
+    // --- 後半への分岐 ---
+    if (rightHalf.length === 1) {
+        nodeContent += `execute if score @s ${namespace}.eventId matches ${rightHalf[0].id} run function ${namespace}:event_tree/i2p/leaf_${rightHalf[0].id}\n`;
+        // ★修正：同上
+        buildTree(rightHalf);
+    } else {
+        nodeContent += `execute if score @s ${namespace}.eventId matches ${midId + 1}..${maxId} run function ${namespace}:event_tree/i2p/node_${midId + 1}_${maxId}\n`;
+        buildTree(rightHalf);
+    }
+
+    // 分岐ノードを保存
+    const fileName = folderName || `node_${minId}_${maxId}`;
+    i2pFolder.file(`${fileName}.mcfunction`, nodeContent);
+}
+
+// ツリー生成の起点
+if (validEvents.length > 0) buildTree(validEvents, "root");
 
             // 4. Windowsでブロックされにくい設定でZIPを生成
             const content = await zip.generateAsync({ 
