@@ -110,13 +110,14 @@
                 compressionOptions: { level: 6 }
             });
             
-            const blob = new Blob([content], { type: "application/zip" });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = "event_tree.zip";
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            const blob = await zip.generateAsync({ type: "blob" });
+
+const link = document.createElement("a");
+link.href = URL.createObjectURL(blob);
+link.download = "event_tree.zip";
+document.body.appendChild(link);
+link.click();
+document.body.removeChild(link);
         }
     </script>
 </body>
